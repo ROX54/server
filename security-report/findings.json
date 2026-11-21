@@ -1,0 +1,153 @@
+{
+  "findings": [
+    {
+      "category": "SAST",
+      "path": "src/main/kotlin/lab/repairdesk/config/RepairCors.kt",
+      "line": 13,
+      "severity": "HIGH",
+      "description": "Политика CORS допускает произвольный origin с учётными данными.",
+      "remediation": "Перечислить доверенные origin или отключить передачу credentials.",
+      "class": "credentialed-cors",
+      "endLine": 14
+    },
+    {
+      "category": "SAST",
+      "path": "src/main/kotlin/lab/repairdesk/config/RepairSecurity.kt",
+      "line": 18,
+      "severity": "HIGH",
+      "description": "Публичное правило для маршрута предшествует более строгому правилу, которое также его покрывает.",
+      "remediation": "Уточнить порядок и область правил доступа и проверить политику для маршрута.",
+      "class": "route-authorization"
+    },
+    {
+      "category": "SAST",
+      "path": "src/main/kotlin/lab/repairdesk/integration/SupplierHttpsClient.kt",
+      "line": 13,
+      "severity": "HIGH",
+      "description": "HTTPS-клиент допускает соединение без штатной проверки имени хоста.",
+      "remediation": "Использовать стандартную проверку имени хоста и доверенную цепочку сертификатов.",
+      "class": "tls-verification"
+    },
+    {
+      "category": "SAST",
+      "path": "src/main/kotlin/lab/repairdesk/repair/RepairLookupController.kt",
+      "line": 13,
+      "severity": "CRITICAL",
+      "description": "SQL собирается с подстановкой динамического значения перед передачей в JDBC.",
+      "remediation": "Передавать значения отдельными параметрами JDBC.",
+      "class": "sql-injection",
+      "endLine": 14
+    },
+    {
+      "category": "SAST",
+      "path": "src/main/kotlin/lab/repairdesk/repair/RepairTicketReader.kt",
+      "line": 10,
+      "severity": "HIGH",
+      "description": "Объект выбирается по идентификатору запроса без видимого ограничения по владельцу.",
+      "remediation": "Ограничить выборку идентификатором текущего пользователя или проверить права на объект.",
+      "class": "object-authorization",
+      "endLine": 11
+    },
+    {
+      "category": "SCA",
+      "path": "build.gradle.kts",
+      "group": "commons-net",
+      "artifact": "commons-net",
+      "version": "3.8.0",
+      "advisoryId": "CVE-2021-37533",
+      "severity": "MEDIUM",
+      "description": "Разрешённая версия входит в диапазон уязвимых версий из локального справочника.",
+      "remediation": "Выбрать исправленную версию из справочника и обновить lockfile."
+    },
+    {
+      "category": "SCA",
+      "path": "build.gradle.kts",
+      "group": "org.apache.commons",
+      "artifact": "commons-compress",
+      "version": "1.25.0",
+      "advisoryId": "CVE-2024-25710",
+      "severity": "MEDIUM",
+      "description": "Разрешённая версия входит в диапазон уязвимых версий из локального справочника.",
+      "remediation": "Выбрать исправленную версию из справочника и обновить lockfile."
+    },
+    {
+      "category": "SCA",
+      "path": "build.gradle.kts",
+      "group": "org.apache.commons",
+      "artifact": "commons-text",
+      "version": "1.9",
+      "advisoryId": "CVE-2022-42889",
+      "severity": "CRITICAL",
+      "description": "Разрешённая версия входит в диапазон уязвимых версий из локального справочника.",
+      "remediation": "Выбрать исправленную версию из справочника и обновить lockfile."
+    },
+    {
+      "category": "SCA",
+      "path": "build.gradle.kts",
+      "group": "org.json",
+      "artifact": "json",
+      "version": "20230227",
+      "advisoryId": "CVE-2023-5072",
+      "severity": "HIGH",
+      "description": "Разрешённая версия входит в диапазон уязвимых версий из локального справочника.",
+      "remediation": "Выбрать исправленную версию из справочника и обновить lockfile."
+    },
+    {
+      "category": "SCA",
+      "path": "build.gradle.kts",
+      "group": "org.jsoup",
+      "artifact": "jsoup",
+      "version": "1.14.1",
+      "advisoryId": "CVE-2021-37714",
+      "severity": "HIGH",
+      "description": "Разрешённая версия входит в диапазон уязвимых версий из локального справочника.",
+      "remediation": "Выбрать исправленную версию из справочника и обновить lockfile."
+    },
+    {
+      "category": "SECRET",
+      "path": "src/main/kotlin/lab/repairdesk/integration/DepotStatusClient.kt",
+      "line": 8,
+      "severity": "HIGH",
+      "description": "При отсутствии настройки используется встроенный секрет.",
+      "remediation": "Удалить значение по умолчанию и явно обработать отсутствие настройки.",
+      "class": "secret-fallback"
+    },
+    {
+      "category": "SECRET",
+      "path": "src/main/kotlin/lab/repairdesk/integration/PartsImportSettings.kt",
+      "line": 4,
+      "severity": "HIGH",
+      "description": "Встроенный пароль хранится в файле проекта.",
+      "remediation": "Загружать пароль из защищённой конфигурации.",
+      "class": "password"
+    },
+    {
+      "category": "SECRET",
+      "path": "src/main/kotlin/lab/repairdesk/integration/QuoteRequest.kt",
+      "line": 7,
+      "severity": "HIGH",
+      "description": "Ключ API задан строковым литералом.",
+      "remediation": "Хранить ключ в защищённой конфигурации и заменить опубликованный ключ.",
+      "class": "api-key"
+    },
+    {
+      "category": "SECRET",
+      "path": "src/main/kotlin/lab/repairdesk/integration/WarrantyHeaders.kt",
+      "line": 7,
+      "severity": "HIGH",
+      "description": "Bearer-токен собирается из строковых литералов в исходниках.",
+      "remediation": "Получать токен из защищённого хранилища.",
+      "class": "recoverable-token",
+      "endLine": 10
+    },
+    {
+      "category": "SECRET",
+      "path": "src/main/resources/application.yml",
+      "line": 13,
+      "severity": "HIGH",
+      "description": "В файле задан токен авторизации.",
+      "remediation": "Загружать токен из защищённого хранилища.",
+      "class": "configuration-token"
+    }
+  ]
+}

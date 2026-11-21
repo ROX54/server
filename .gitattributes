@@ -1,0 +1,2 @@
+*.sh text eol=lf
+training-project/gradlew text eol=lf

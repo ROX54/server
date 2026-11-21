@@ -1,0 +1,99 @@
+rules:
+  - id: cg26-jdbc-interpolated-sql
+    languages: [kotlin]
+    severity: ERROR
+    message: Параметр запроса встроен в SQL-строку, которую выполняет JDBC. Нужна параметризация через placeholder.
+    metadata:
+      class: sql-injection
+      cwe: "CWE-89"
+      category: security
+    patterns:
+      - pattern-either:
+          - pattern: $DB.queryForList("=~/.*\\$[A-Za-z_][A-Za-z0-9_]*.*/", ...)
+          - pattern: $DB.query("=~/.*\\$[A-Za-z_][A-Za-z0-9_]*.*/", ...)
+          - pattern: $DB.queryForObject("=~/.*\\$[A-Za-z_][A-Za-z0-9_]*.*/", ...)
+    paths:
+      exclude:
+        - "*.md"
+
+  - id: cg26-hostname-verifier-disabled
+    languages: [kotlin]
+    severity: WARNING
+    message: HostnameVerifier безусловно возвращает true, поэтому имя хоста в сертификате не проверяется.
+    metadata:
+      class: tls-verification
+      cwe: "CWE-297"
+      category: security
+    pattern-either:
+      - pattern: HostnameVerifier { $_, $_ -> true }
+      - pattern: hostnameVerifier = HostnameVerifier { $_, $_ -> true }
+
+  - id: cg26-credentialed-wildcard-cors
+    languages: [kotlin]
+    severity: WARNING
+    message: CORS одновременно разрешает произвольный origin и учётные данные. Браузер может отправить cookie на приватный маршрут с чужого origin.
+    metadata:
+      class: credentialed-cors
+      cwe: "CWE-942"
+      category: security
+    pattern-either:
+      - pattern: |
+          allowedOriginPatterns = listOf("*")
+          ...
+          allowCredentials = true
+      - pattern: |
+          allowCredentials = true
+          ...
+          allowedOriginPatterns = listOf("*")
+
+  - id: cg26-permitall-non-catalog
+    languages: [kotlin]
+    severity: ERROR
+    message: permitAll открывает API-маршрут, который не входит в публичный каталог. Для выдачи и клиентских данных нужна проверка роли.
+    metadata:
+      class: route-authorization
+      cwe: "CWE-862"
+      category: security
+    pattern-regex: requestMatchers\([^)\n]*"(?!/api/catalog/)[^"\n]+"\)\.permitAll\(\)
+
+  - id: cg26-read-by-id-without-owner
+    languages: [kotlin]
+    severity: ERROR
+    message: Запись читается по идентификатору из запроса, а предикат SQL не ограничивает владельца. Аутентифицированный пользователь может запросить чужой объект.
+    metadata:
+      class: object-authorization
+      cwe: "CWE-639"
+      category: security
+    patterns:
+      - pattern: |
+          fun $M($ID: Long): $T = $DB.query(
+            $SQL,
+            $MAPPER,
+            $ID,
+          )
+      - focus-metavariable: $M
+      - metavariable-regex:
+          metavariable: $SQL
+          regex: (?is)(?=.*ticket_id\s*=\s*\?)(?!.*customer_id).*
+
+  - id: cg26-concatenated-bearer
+    languages: [kotlin]
+    severity: WARNING
+    message: Значение Bearer собирается из соседних строковых литералов. Фрагменты вместе являются восстанавливаемым секретом.
+    metadata:
+      class: recoverable-token
+      cwe: "CWE-798"
+      category: security
+    patterns:
+      - pattern: |
+          val $A = "..."
+          val $B = "..."
+          val $C = $A + $B
+          ...
+          setBearerAuth($C)
+      - metavariable-regex:
+          metavariable: $A
+          regex: ".{4,}"
+      - metavariable-regex:
+          metavariable: $B
+          regex: ".{4,}"
