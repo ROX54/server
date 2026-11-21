@@ -1,5 +1,5 @@
 """Run saved graphs against the fixed local training project."""
-from collections import deque
+from collections import Counter, deque
 from contextlib import closing, contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
@@ -58,6 +58,12 @@ class Packet:
     kind: str
     findings: tuple = ()
     analyses: tuple = ()
+
+
+def packet_summary(packet):
+    return {"type": packet.kind, "findingCount": len(packet.findings),
+            "categories": dict(Counter(row["category"] for row in packet.findings)),
+            "analysisCount": len(packet.analyses)}
 
 
 def merge_findings(*groups):
@@ -210,17 +216,21 @@ def execute_graph(graph, run, persist, scan=subprocess_scanner, stopped=lambda: 
             return
         node, state = nodes[key], states[key]
         kind, params = node["type"], node["params"]
-        packets = [
-            outputs[(edge["source"], edge["sourcePort"])]
+        active_inputs = [
+            (edge, outputs[(edge["source"], edge["sourcePort"])])
             for edge in incoming[key] if (edge["source"], edge["sourcePort"]) in outputs
         ]
+        packets = [packet for _, packet in active_inputs]
         if key not in roots and not packets:
             state.update(status="skipped", finishedAt=stamp(),
                          message="Нет активных входных данных от выбранного триггера или ветки.")
             persist(run)
             continue
         node_start = monotonic()
-        state.update(status="running", startedAt=stamp())
+        state.update(status="running", startedAt=stamp(), inputs=[
+            {"nodeId": edge["source"], "port": edge["sourcePort"], **packet_summary(packet)}
+            for edge, packet in active_inputs
+        ], outputs=[])
         persist(run)
         try:
             remaining = RUN_TIMEOUT - (monotonic() - start)
@@ -288,7 +298,10 @@ def execute_graph(graph, run, persist, scan=subprocess_scanner, stopped=lambda: 
         except (IndexError, KeyError, TypeError, ValueError):
             state.update(status="failed", message="Нода получила недопустимые данные.")
             run["errors"].append(f"{key}: недопустимые данные.")
-        state.update(finishedAt=stamp(), durationMs=round((monotonic() - node_start) * 1000))
+        state.update(finishedAt=stamp(), durationMs=round((monotonic() - node_start) * 1000), outputs=[
+            {"port": port, **packet_summary(outputs[key, port])}
+            for port in NODE_TYPES[kind]["outputs"] if (key, port) in outputs
+        ])
         persist(run)
     run.update(status="failed" if run["errors"] else "success",
                finishedAt=stamp(), durationMs=round((monotonic() - start) * 1000))
@@ -353,14 +366,22 @@ class RunStore:
         return json.loads(row[0])
 
     def history(self, workflow_id=None):
-        query = "SELECT summary FROM runs"
+        query = "SELECT id, summary FROM runs"
         arguments = ()
         if workflow_id:
             query += " WHERE workflow=?"
             arguments = (workflow_id,)
         with self.connect() as db:
             records = db.execute(query + " ORDER BY queued DESC", arguments).fetchall()
-        return [json.loads(row[0]) for row in records]
+            history = []
+            for key, raw in records:
+                row = json.loads(raw)
+                if "workflowName" not in row:
+                    old = db.execute("SELECT payload FROM runs WHERE id=?", (key,)).fetchone()
+                    if old:
+                        row["workflowName"] = json.loads(old[0]).get("workflowName")
+                history.append(row)
+        return history
 
     def recover(self):
         with self.connect() as db:
@@ -379,7 +400,7 @@ def run_summary(run):
 
 
 def history_summary(run):
-    return {key: run[key] for key in ("runId", "workflowId", "queuedAt", "startedAt", "finishedAt",
+    return {key: run[key] for key in ("runId", "workflowId", "workflowName", "queuedAt", "startedAt", "finishedAt",
                                       "trigger", "status", "durationMs")} | {
         "findingCount": len(run["findings"]),
     }
@@ -436,12 +457,18 @@ class WorkflowRuntime:
         with self.gate:
             if self.stop.is_set() or self.queue.full():
                 raise QueueBusy("Очередь заполнена или сервер останавливается.")
+            if not self.workflows.path(workflow["id"]).is_file():
+                raise FileNotFoundError
             run = new_run(workflow, roots, source, slot)
             if not self.store.reserve(run):
                 return None
             queued = deepcopy(run)
             self.queue.put_nowait((workflow["graph"], run))
         return queued
+
+    def archive(self, key):
+        with self.gate:
+            self.workflows.archive(key)
 
     def manual(self, key):
         workflow = self.workflows.load(key)

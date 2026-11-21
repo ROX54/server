@@ -11,7 +11,7 @@ from threading import Lock
 from urllib.parse import parse_qs, urlparse
 
 from ai_assistant import AIError, SAFE_FIELDS, settings as ai_settings
-from security_workflow import DATABASE, analyze, read, write_reports, write_text
+from security_workflow import DATABASE, analyze, read, report_markdown, write_reports, write_text
 from validate_results import TRUTH, evaluate, load_findings, validation_markdown
 from workflow_graph import (
     MAX_COORDINATE, MAX_EDGES, MAX_NODES, NODE_TYPES, VERSION, InvalidWorkflow,
@@ -120,6 +120,8 @@ class Handler(BaseHTTPRequestHandler):
         path=urlparse(self.path).path
         if path in {"/api/workflows", "/api/workflows/validate"}:
             return self.save_workflow(path)
+        if path.startswith("/api/workflows/") and path.endswith("/archive") and path.count("/") == 4:
+            return self.archive_workflow(path.split("/")[3])
         if path.startswith("/api/workflows/") and path.endswith("/run") and path.count("/") == 4:
             return self.start_workflow(path.split("/")[3])
         if path in {"/api/ai/explain", "/api/ai/check"}:
@@ -186,6 +188,20 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, ValueError, sqlite3.Error):
             return self.send_json({"errors": ["Не удалось создать запуск."]}, 500)
 
+    def archive_workflow(self, workflow_id):
+        if self.headers.get_content_type() != "application/json":
+            return self.send_json({"errors": ["Ожидается JSON."]}, 415)
+        runtime = getattr(self.server, "workflow_runtime", None)
+        if runtime is None:
+            return self.send_json({"errors": ["Исполнитель workflow недоступен."]}, 503)
+        try:
+            runtime.archive(workflow_id)
+        except FileNotFoundError:
+            return self.send_json({"errors": ["Workflow не найден."]}, 404)
+        except OSError:
+            return self.send_json({"errors": ["Не удалось переместить workflow в архив."]}, 500)
+        return self.send_json({"archived": True})
+
     def workflow_schedule(self, workflow_id):
         runtime = getattr(self.server, "workflow_runtime", None)
         if runtime is None:
@@ -213,22 +229,28 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"findings": run["findings"], "reports": run["reports"],
                                        "analyses": run.get("analyses", {}),
                                        "deliveries": run.get("deliveries", {})})
+            if len(parts) == 2 and parts[0] == "exports" and parts[1] in {"findings.json", "report.md"}:
+                if run["status"] in {"queued", "running"}:
+                    return self.send_json({"errors": ["Дождитесь завершения запуска."]}, 409)
+                report = {"json": {"findings": run["findings"]}, "markdown": report_markdown(run["findings"])}
+                return self.send_run_report(report, parts[1])
             if len(parts) == 3 and parts[0] == "reports" and parts[1] in run["reports"]:
-                report = run["reports"][parts[1]]
-                if parts[2] == "findings.json":
-                    data = json.dumps(report["json"], ensure_ascii=False, indent=2) + "\n"
-                    mime = "application/json; charset=utf-8"
-                elif parts[2] == "report.md":
-                    data, mime = report["markdown"], "text/markdown; charset=utf-8"
-                else:
-                    raise FileNotFoundError
-                return self.send_bytes(data.encode(), mime,
-                                       extra={"Content-Disposition": f'attachment; filename="{parts[2]}"'})
+                return self.send_run_report(run["reports"][parts[1]], parts[2])
             raise FileNotFoundError
         except FileNotFoundError:
             return self.send_json({"errors": ["Запуск или отчёт не найден."]}, 404)
         except (OSError, ValueError, sqlite3.Error):
             return self.send_json({"errors": ["Не удалось прочитать результаты запуска."]}, 500)
+
+    def send_run_report(self, report, filename):
+        if filename == "findings.json":
+            data = json.dumps(report["json"], ensure_ascii=False, indent=2) + "\n"
+            mime = "application/json; charset=utf-8"
+        elif filename == "report.md":
+            data, mime = report["markdown"], "text/markdown; charset=utf-8"
+        else:
+            raise FileNotFoundError
+        return self.send_bytes(data.encode(), mime, extra={"Content-Disposition": f'attachment; filename="{filename}"'})
 
     def save_workflow(self, path):
         if self.headers.get_content_type() != "application/json":

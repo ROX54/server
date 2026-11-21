@@ -295,6 +295,15 @@ class WorkflowStore:
             rows.append({"id": record["id"], "name": record["graph"]["name"], "updatedAt": record["updatedAt"]})
         return sorted(rows, key=lambda row: row["updatedAt"], reverse=True)
 
+    def archive(self, key):
+        with STORE_LOCK:
+            source = self.path(key)
+            if not source.is_file():
+                raise FileNotFoundError
+            archive = self.directory / "archive"
+            archive.mkdir(exist_ok=True)
+            source.rename(archive / source.name)
+
     def save(self, graph, key=None):
         if errors := graph_errors(graph):
             raise InvalidWorkflow(errors)
