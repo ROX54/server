@@ -148,9 +148,11 @@ class EngineTests(unittest.TestCase):
                                                    findings), expected)
 
     def test_unconfigured_ai_and_dependents_have_truthful_states(self):
+        graph = templates()[1]
+        next(node for node in graph["nodes"] if node["type"] == "ai")["params"]["continueOnError"] = False
         with patch.dict("os.environ", {"OPENAI_BASE_URL": "https://api.openai.com/v1",
                                       "OPENAI_API_KEY": "", "OPENAI_MODEL": "not-configured"}):
-            run, _ = self.execute(templates()[1])
+            run, _ = self.execute(graph)
         statuses = {node["type"]: node["status"] for node in run["nodes"]}
         self.assertEqual((run["status"], statuses["ai"], statuses["report"]), ("failed", "failed", "skipped"))
 

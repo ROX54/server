@@ -270,6 +270,7 @@ class IntegrationTests(unittest.TestCase):
                 self.assertEqual(report["markdown"].count("\n| S"), 15)
                 delivered = json.loads(printed.call_args.args[0])
                 self.assertEqual(delivered["runId"], run["runId"])
+                self.assertEqual(delivered["status"], "success")
                 self.assertEqual(delivered["counts"], {"SECRET": 5, "SAST": 5, "SCA": 5})
                 self.assertGreater(delivered["criticalCount"], 0)
                 self.assertEqual(delivered["ai"][0]["analyzedCount"], 15)

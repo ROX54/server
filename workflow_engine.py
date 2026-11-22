@@ -4,6 +4,7 @@ from contextlib import closing, contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from functools import partial
 import json
 from pathlib import Path
 from queue import Empty, Queue
@@ -21,6 +22,7 @@ from security_workflow import (
 )
 from workflow_controls import SEVERITIES, condition_matches, next_slot
 from workflow_graph import InvalidWorkflow, NODE_TYPES, STORED_ID, graph_errors
+from workflow_sources import SourceError, approved_source, imported_project
 from workflow_webhook import WebhookError, deliver, notification
 
 PROJECT = ROOT / "training-project"
@@ -78,16 +80,16 @@ def merge_findings(*groups):
     return tuple(unique.values())
 
 
-def subprocess_scanner(kind, timeout):
+def subprocess_scanner(kind, timeout, project=PROJECT):
     if kind not in SCANNERS:
         raise RunError("Неизвестный тип сканера.")
     try:
         result = subprocess.run(
-            [sys.executable, "-B", str(Path(__file__).resolve()), kind],
+            [sys.executable, "-B", str(Path(__file__).resolve()), kind, str(project)],
             cwd=ROOT, capture_output=True, timeout=timeout, check=True,
         )
         findings = json.loads(result.stdout)
-        check_findings(findings, PROJECT)
+        check_findings(findings, project)
         return findings
     except subprocess.TimeoutExpired:
         raise RunError("Сканер превысил допустимое время выполнения.") from None
@@ -194,7 +196,7 @@ def render_report(title, findings):
 
 
 def execute_graph(graph, run, persist, scan=subprocess_scanner, stopped=lambda: False,
-                  integrate=bounded_integration):
+                  integrate=bounded_integration, started=None):
     if errors := graph_errors(graph):
         raise InvalidWorkflow(errors)
     nodes = {node["id"]: node for node in graph["nodes"]}
@@ -202,12 +204,14 @@ def execute_graph(graph, run, persist, scan=subprocess_scanner, stopped=lambda: 
     if not roots or any(key not in nodes or nodes[key]["type"] not in {"manual", "schedule"} for key in roots):
         raise RunError("Нет подходящего входного триггера.")
     order, incoming = graph_order(graph)
+    # Notification nodes have no outputs. Deliver after all analysis branches finish.
+    order = sorted(order, key=lambda key: nodes[key]["type"] == "webhook")
     states = {state["id"]: state for state in run["nodes"]}
     outputs = {}
     collected = ()
     artifact_bytes = 0
-    start = monotonic()
-    run.update(status="running", startedAt=stamp())
+    start = monotonic() if started is None else started
+    run.update(status="running", startedAt=run["startedAt"] or stamp())
     persist(run)
     for key in order:
         if stopped():
@@ -279,7 +283,8 @@ def execute_graph(graph, run, persist, scan=subprocess_scanner, stopped=lambda: 
                 outputs[key, "out"] = Packet("report", findings, reviews)
             elif kind == "webhook":
                 summaries = [run["analyses"][review] for review in reviews]
-                payload = notification(run["runId"], "failed" if run["errors"] else "running", findings, summaries)
+                failed = any(node["type"] != "webhook" and node["status"] == "failed" for node in states.values())
+                payload = notification(run["runId"], "failed" if failed else "success", findings, summaries)
                 receipt = integrate(kind, {"profile": params["endpointRef"], "notification": payload, "nodeId": key},
                                     min(INTEGRATION_TIMEOUT, remaining))
                 run["deliveries"][key] = receipt
@@ -449,7 +454,7 @@ class WorkflowRuntime:
                     thread.join()
                 self.store.recover()
 
-    def enqueue(self, workflow, roots, source, slot=None):
+    def enqueue(self, workflow, roots, source, slot=None, repository=None):
         if errors := graph_errors(workflow["graph"]):
             raise InvalidWorkflow(errors)
         if not roots:
@@ -460,6 +465,9 @@ class WorkflowRuntime:
             if not self.workflows.path(workflow["id"]).is_file():
                 raise FileNotFoundError
             run = new_run(workflow, roots, source, slot)
+            if repository is not None:
+                run.update(repository={"url": repository[0], "revision": repository[1]},
+                           sourceStatus="queued")
             if not self.store.reserve(run):
                 return None
             queued = deepcopy(run)
@@ -470,13 +478,14 @@ class WorkflowRuntime:
         with self.gate:
             self.workflows.archive(key)
 
-    def manual(self, key):
+    def manual(self, key, repository=None):
+        source = approved_source(repository) if repository is not None else None
         workflow = self.workflows.load(key)
         nodes = workflow["graph"]["nodes"]
         roots = [node["id"] for node in nodes if node["type"] == "manual"]
         if not roots:
             roots = [node["id"] for node in nodes if node["type"] == "schedule"]
-        return self.enqueue(workflow, roots, "manual")
+        return self.enqueue(workflow, roots, "manual", repository=source)
 
     def work(self):
         while not self.stop.is_set():
@@ -485,7 +494,24 @@ class WorkflowRuntime:
             except Empty:
                 continue
             try:
-                execute_graph(graph, run, self.store.save, self.scan, self.stop.is_set)
+                if source := run.get("repository"):
+                    started = monotonic()
+                    run.update(status="running", startedAt=stamp(), sourceStatus="loading")
+                    self.store.save(run)
+                    try:
+                        with imported_project(source["url"], source["revision"]) as project:
+                            run["sourceStatus"] = "ready"
+                            scanner = partial(subprocess_scanner, project=project)
+                            execute_graph(graph, run, self.store.save, scanner, self.stop.is_set, started=started)
+                    except SourceError as error:
+                        finished = stamp()
+                        for node in run["nodes"]:
+                            node.update(status="skipped", finishedAt=finished, message="Учебный проект не загружен.")
+                        run.update(status="failed", sourceStatus="failed", finishedAt=finished,
+                                   durationMs=round((monotonic() - started) * 1000), errors=[str(error)])
+                        self.store.save(run)
+                else:
+                    execute_graph(graph, run, self.store.save, self.scan, self.stop.is_set)
             except Exception:
                 interrupt(run)
                 run["status"] = "failed"
@@ -532,14 +558,16 @@ class WorkflowRuntime:
 
 if __name__ == "__main__":
     # Worker actions come from fixed registries, never from workflow parameters.
-    if len(sys.argv) != 2 or sys.argv[1] not in (SCANNERS.keys() | INTEGRATIONS):
+    if len(sys.argv) not in {2, 3} or sys.argv[1] not in (SCANNERS.keys() | INTEGRATIONS):
         raise SystemExit(2)
     kind = sys.argv[1]
     if kind in INTEGRATIONS:
+        if len(sys.argv) != 2:
+            raise SystemExit(2)
         job = json.load(sys.stdin.buffer)
         result = integration_result(kind, job["payload"], job["timeout"])
     else:
-        project = project_root(PROJECT)
+        project = project_root(Path(sys.argv[2]) if len(sys.argv) == 3 else PROJECT)
         result = scan_sca(project, DATABASE) if kind == "sca" else SCANNERS[kind](project)
         check_findings(result, project)
         if len(result) > MAX_FINDINGS:

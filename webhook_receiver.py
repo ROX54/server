@@ -50,7 +50,7 @@ def safe_notification(data):
     if not isinstance(data, dict) or not isinstance(data.get("runId"), str) or not RUN_ID.fullmatch(data["runId"]):
         raise ValueError
     status, counts, critical = data.get("status"), data.get("counts"), data.get("criticalCount")
-    if (status not in ("running", "failed") or data.get("phase") != "notification"
+    if (status not in ("running", "failed", "success") or data.get("phase") != "notification"
             or not isinstance(counts, dict) or counts.keys() != set(CATEGORIES)
             or any(type(value) is not int or not 0 <= value <= 1000 for value in counts.values())
             or type(critical) is not int or not 0 <= critical <= sum(counts.values())):

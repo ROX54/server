@@ -18,6 +18,7 @@ from workflow_graph import (
     WorkflowStore, graph_errors, templates,
 )
 from workflow_engine import QueueBusy, RunError, WorkflowRuntime, bounded_integration, run_summary
+from workflow_sources import SourceError
 
 ROOT = Path(__file__).resolve().parent
 PROJECT = ROOT / "training-project"
@@ -176,15 +177,23 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get_content_type() != "application/json":
             return self.send_json({"errors": ["Ожидается JSON."]}, 415)
         try:
-            return self.send_json(run_summary(runtime.manual(workflow_id)), 202)
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 <= length <= 1024:
+                return self.send_json({"errors": ["Недопустимый размер запроса запуска."]}, 413)
+            body = json.loads(self.rfile.read(length) or b"{}")
+            if not isinstance(body, dict) or body.keys() - {"repository"}:
+                return self.send_json({"errors": ["Ожидается объект с необязательным полем repository."]}, 400)
+            return self.send_json(run_summary(runtime.manual(workflow_id, body.get("repository"))), 202)
         except InvalidWorkflow as error:
             return self.send_json({"errors": error.errors}, 422)
         except FileNotFoundError:
             return self.send_json({"errors": ["Workflow не найден."]}, 404)
         except QueueBusy as error:
             return self.send_json({"errors": [str(error)]}, 409)
-        except RunError as error:
+        except (RunError, SourceError) as error:
             return self.send_json({"errors": [str(error)]}, 422)
+        except (json.JSONDecodeError, UnicodeError, RecursionError):
+            return self.send_json({"errors": ["Не удалось прочитать JSON запроса."]}, 400)
         except (OSError, ValueError, sqlite3.Error):
             return self.send_json({"errors": ["Не удалось создать запуск."]}, 500)
 

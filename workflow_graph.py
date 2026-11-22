@@ -110,14 +110,18 @@ def template(name, nodes, edges):
 def templates():
     core = [("manual", "manual"), ("secret", "secret"), ("sast", "sast"), ("sca", "sca")]
     quick = [*core, ("report", "report")]
-    full = [*core, ("ai", "ai"), ("report", "report")]
+    demo = [*core, ("condition", "condition"), ("ai", "ai"), ("report", "report"), ("notify", "webhook")]
     alert = [("schedule", "schedule"), *core[1:], ("condition", "condition")]
     return [
-        template(name, [make_node(key, kind, 30 + (i % 3) * 230, 60 + (i // 3) * 190)
-                        for i, (key, kind) in enumerate(steps)],
-                 [make_edge(a[0], b[0]) for a, b in zip(steps, steps[1:])])
-        for name, steps in (("Quick Security Scan", quick), ("Full Security Audit", full))
-    ] + [
+        template("Quick Security Scan", [make_node(key, kind, 30 + (i % 3) * 230, 60 + (i // 3) * 190)
+                        for i, (key, kind) in enumerate(quick)],
+                 [make_edge(a[0], b[0]) for a, b in zip(quick, quick[1:])]),
+        template("Full Security Audit",
+                 [make_node(key, kind, 30 + (i % 3) * 230, 60 + (i // 3) * 190,
+                            **({"continueOnError": True, "maxFindings": 5} if key == "ai" else {}))
+                  for i, (key, kind) in enumerate(demo)],
+                 [make_edge(a[0], b[0], "true" if a[0] == "condition" else "out")
+                  for a, b in zip(demo, demo[1:])]),
         template("Critical Findings Alert",
                  [make_node(key, kind, 30 + (i % 3) * 230, 60 + (i // 3) * 190)
                   for i, (key, kind) in enumerate(alert)] + [

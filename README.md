@@ -8,6 +8,8 @@
 
 Сервер ищет frontend в `../client`. Для другого расположения задайте `CYBERGARDEN_CLIENT_DIR` в окружении или локальном `.env`. API можно использовать отдельно от интерфейса. Например, `GET /api/findings` возвращает конкурсные результаты.
 
+В Workflow Builder откройте **Full Security Audit**. Ручной Run принимает разрешённый URL учебного репозитория или использует встроенный Repair Desk. Расписание использует встроенный проект. [Репетиция и выступление](DEMO-GUIDE.md), [сверка конкурсных требований](FINAL-CHECKLIST.md).
+
 ## Проверка и настройки
 
 - Проверьте анализаторы командами `python security_workflow.py` и `python validate_results.py`. JSON, Markdown и метрики находятся в `security-report/`.
