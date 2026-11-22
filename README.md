@@ -2,6 +2,8 @@
 
 Локальный Python API для статического анализа учебного Repair Desk. Сервер содержит собственные SECRET, SAST и SCA, исполнитель workflow, расписание, историю, AI Analysis и уведомления webhook.
 
+В проверенном живом запуске Groq `openai/gpt-oss-20b` вернул валидированный JSON и рекомендации для **15/15** находок. AI Analysis занял **4,22 с**, весь Full Security Audit — **5,69 с**. Локальный webhook подтвердил доставку ответом **HTTP 200**. [Инструкция по записи демонстрации](DEMO-GUIDE.md).
+
 ## Запуск
 
 Требуется Python 3.10+. Склонируйте [server](https://github.com/ROX54/server) и [client](https://github.com/ROX54/client) в соседние каталоги. В каталоге `server` запустите `START-DASHBOARD.bat` на Windows или `./START-DASHBOARD.sh` на Linux и macOS. Dashboard доступен на [127.0.0.1:8765](http://127.0.0.1:8765).

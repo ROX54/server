@@ -240,6 +240,9 @@ class IntegrationTests(unittest.TestCase):
 
                 self.assertTrue(request("GET", "/api/ai/settings")[1]["configured"])
                 self.assertTrue(request("POST", "/api/ai/check", {})[1]["connected"])
+                probe = json.loads(provider.requests[-1])
+                self.assertGreaterEqual(probe["max_tokens"], 256)
+                self.assertNotIn("response_format", probe)
                 baseline = request("GET", "/api/findings")[1]["findings"][0]
                 status, _ = request("POST", "/api/ai/explain", {
                     "finding": dict(baseline, description=SECRET_CANARY),

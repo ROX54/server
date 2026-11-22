@@ -92,8 +92,9 @@ def strict_json(text):
 
 
 def completion(config, messages, timeout, *, structured=True):
+    # Reasoning models can spend the first tokens before producing visible output.
     body = {"model": config.model, "messages": messages, "temperature": 0,
-            "max_tokens": 4096 if structured else 12}
+            "max_tokens": 4096 if structured else 512}
     if structured:
         body["response_format"] = {"type": "json_object"}
     headers = {"Content-Type": "application/json"}
